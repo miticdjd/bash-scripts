@@ -2,7 +2,7 @@
 
 set -e
 
-echo "🔒 Setting Cloudflare-only access for ports 80 and 443..."
+echo "🔒 Setting Cloudflare-only access for ports 80 and 443 (UFW + Docker forwarding)..."
 
 # === Cloudflare IPv4 ===
 CF_IPV4=(
@@ -34,30 +34,52 @@ CF_IPV6=(
 "2c0f:f248::/32"
 )
 
-# === Function to add rule if not exists ===
-add_rule() {
+# === Function to add IN rule if not exists ===
+add_in_rule() {
     local IP=$1
     local PORT=$2
 
     if ! ufw status | grep -q "$IP.*$PORT"; then
         ufw allow from "$IP" to any port "$PORT" proto tcp
-        echo "✔️ Allowed $IP -> port $PORT"
+        echo "✔️ IN  $IP -> port $PORT"
     else
-        echo "⏭️ Skipped $IP -> port $PORT (already exists)"
+        echo "⏭️ IN  $IP -> port $PORT (exists)"
     fi
 }
 
-# === Add IPv4 rules ===
+# === Function to add ROUTE rule if not exists ===
+add_route_rule() {
+    local IP=$1
+    local PORT=$2
+
+    if ! ufw status | grep -q "$IP.*$PORT.*FWD"; then
+        ufw route allow proto tcp from "$IP" to any port "$PORT"
+        echo "✔️ FWD $IP -> port $PORT"
+    else
+        echo "⏭️ FWD $IP -> port $PORT (exists)"
+    fi
+}
+
+# === Apply IPv4 ===
 for ip in "${CF_IPV4[@]}"; do
-    add_rule "$ip" 80
-    add_rule "$ip" 443
+    add_in_rule "$ip" 80
+    add_in_rule "$ip" 443
+
+    add_route_rule "$ip" 80
+    add_route_rule "$ip" 443
 done
 
-# === Add IPv6 rules ===
+# === Apply IPv6 ===
 for ip in "${CF_IPV6[@]}"; do
-    add_rule "$ip" 80
-    add_rule "$ip" 443
+    add_in_rule "$ip" 80
+    add_in_rule "$ip" 443
+
+    add_route_rule "$ip" 80
+    add_route_rule "$ip" 443
 done
+
+echo "🔄 Reloading UFW..."
+ufw reload
 
 echo "✅ Done!"
-echo "👉 Run 'ufw status numbered' to verify"
+echo "👉 Verify with: ufw status numbered"
